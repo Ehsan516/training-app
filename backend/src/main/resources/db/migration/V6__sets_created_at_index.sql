@@ -1,0 +1,1 @@
+CREATE INDEX IF NOT EXISTS idx_sets_session_created ON sets (session_id, created_at);
