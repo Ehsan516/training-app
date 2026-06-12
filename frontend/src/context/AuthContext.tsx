@@ -5,63 +5,101 @@ import {
   type ReactNode,
   useEffect,
 } from "react";
-import { loginApi } from "../api/auth";
+import { loginApi, meApi, signupApi } from "../api/auth";
 import type { LoginResponse } from "../types/auth";
+import {
+  clearAuthStorage,
+  getStoredUser,
+  getToken,
+  setStoredUser,
+  setToken,
+} from "../lib/tokenStore";
 
 type AuthState = {
   user: LoginResponse["user"] | null;
   accessToken: string | null;
+  loadingAuth: boolean;
   login: (email: string, password: string) => Promise<void>;
+  signup: (email: string, password: string) => Promise<void>;
   logout: () => void;
 };
 
 const AuthContext = createContext<AuthState | undefined>(undefined);
 
-export function AuthProvider({ children }: { children: ReactNode }) { //gonna pass app
-  const [user, setUser] = useState<AuthState["user"]>(null);//setting user and token
-  const [accessToken, setToken] = useState<string | null>(null);
-  //^holds user and jwt string, null otherwise
+export function AuthProvider({ children }: { children: ReactNode }) {
+  const [user, setUser] = useState<AuthState["user"]>(null);
+  const [accessToken, setAccessToken] = useState<string | null>(null);
+  const [loadingAuth, setLoadingAuth] = useState(true);
 
-  async function login(email: string, password: string) {//parse user data when logged in
-    const res = await loginApi({ email, password });//makres request
+  async function login(email: string, password: string) {
+    const res = await loginApi({ email, password });
+
     setUser(res.user);
+    setAccessToken(res.accessToken);
+
     setToken(res.accessToken);
-    //(temp) persist so refresh survives page reloads(react states and local storage)
-    localStorage.setItem("accessToken", res.accessToken);
-    localStorage.setItem("user", JSON.stringify(res.user));
+    setStoredUser(res.user);
   }
 
-  function logout() {//clears user and token state to null after logout
+  async function signup(email: string, password: string) {
+    const res = await signupApi({ email, password });
+
+    setUser(res.user);
+    setAccessToken(res.accessToken);
+
+    setToken(res.accessToken);
+    setStoredUser(res.user);
+  }
+
+  function logout() {
     setUser(null);
-    setToken(null);
-    localStorage.removeItem("accessToken");
-    localStorage.removeItem("user");
+    setAccessToken(null);
+    clearAuthStorage();
   }
 
   useEffect(() => {
-    try {
-      const savedUser = localStorage.getItem("user");
-      const savedTok = localStorage.getItem("accessToken")
-      //chekcs local storage for user and jwt for refresh
-      if (savedUser && savedTok) {
-        setUser(JSON.parse(savedUser));
-        setToken(savedTok);
+    async function loadAuth() {
+      const savedToken = getToken();
+      const savedUser = getStoredUser<LoginResponse["user"]>();
+
+      if (!savedToken || !savedUser) {
+        setLoadingAuth(false);
+        return;
       }
-    } catch {
-      //ignore parse errors
+
+      setAccessToken(savedToken);
+      setUser(savedUser);
+
+      try {
+        const currentUser = await meApi();
+        setUser(currentUser);
+        setStoredUser(currentUser);
+      } catch {
+        logout();
+      } finally {
+        setLoadingAuth(false);
+      }
     }
+
+    loadAuth();
   }, []);
 
   return (
-    <AuthContext.Provider value={{ user, accessToken, login, logout }}>
+    <AuthContext.Provider
+      value={{ user, accessToken, loadingAuth, login, signup, logout }}
+    >
       {children}
     </AuthContext.Provider>
   );
 }
 
 // eslint-disable-next-line react-refresh/only-export-components
-export function useAuth() { //had to disable line for the linter, otherwise wouldn't use hook
+export function useAuth() {
   const ctx = useContext(AuthContext);
-  if (!ctx) throw new Error("useAuth must be used within AuthProvider");
+
+  if (!ctx) {
+    throw new Error("useAuth must be used within AuthProvider");
+  }
+
   return ctx;
 }
